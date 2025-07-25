@@ -3,6 +3,8 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require('@discordjs/voice');
 const { spawn } = require('child_process');
 const path = require('path');
+const play = require('play-dl');
+const { video_basic_info, stream } = require('play-dl');
 
 process.env.PATH = `${__dirname};${process.env.PATH}`; // yt-dlp.exe 실행 경로 추가
 
@@ -38,7 +40,7 @@ client.on('messageCreate', async (message) => {
       url = query;
     } else {
       // ✨ 제목으로 유튜브 검색
-      const play = require('play-dl');
+      // const play = require('play-dl');
       const searchResults = await play.search(query, { limit: 1 });
       if (searchResults.length === 0 || !searchResults[0].url) {
         return message.reply('유튜브에서 노래를 찾지 못했습니다.');
@@ -92,10 +94,14 @@ client.on('messageCreate', async (message) => {
     message.reply('명령어 처리 중 오류 발생!');
   }
 });
-
+/*
 async function getAudioStreamUrl(videoUrl) {
   return new Promise((resolve, reject) => {
-    const ytdlp = spawn(path.join(__dirname, 'yt-dlp.exe'), ['-f', 'bestaudio', '-g', videoUrl]);
+    const ytdlp = spawn(path.join(__dirname, 'yt-dlp.exe'), [
+      '--no-playlist',
+      '--sponsorblock-remove','all',
+      '-f', 'bestaudio', '-g', videoUrl
+    ]);
 
     let data = '';
     ytdlp.stdout.on('data', (chunk) => {
@@ -144,6 +150,41 @@ async function playNext(guildId) {
     console.log(`Now playing: ${nextTrack.url}`);
   } catch (err) {
     console.error('노래 재생 중 오류:', err);
+    playNext(guildId);
+  }
+}
+*/
+
+async function playNext(guildId){
+  const serverQueue = queueMap.get(guildId);
+  if(!serverQueue || serverQueue.queue.length === 0){
+    serverQueue.playing = false;
+    serverQueue.connection.destroy();
+    queueMap.delete(guildId);
+    return;
+  }
+
+  const nextTrack = serverQueue.queue.shift();
+  try{
+    console.log('[DEBUG] 재생 시작 URL:', nextTrack.url);
+
+    const info = await video_basic_info(nextTrack.url);
+
+    if(!info || !info.video_details || !info.video_details.url){
+      console.error('video_basic_info 실패 : 유효하지 않은 정보');
+      return playNext(guildId);
+    }
+
+    const streamData = await play.stream(info.video_details.url);
+
+    const resource = createAudioResource(streamData.stream, {
+      inputType: streamData.type,
+    });
+
+    serverQueue.player.play(resource);
+    serverQueue.playing = true;
+  } catch(err){
+    console.error("노래 재생 중 오류 : ", err);
     playNext(guildId);
   }
 }
